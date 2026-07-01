@@ -1,0 +1,114 @@
+/* Tasarımda Kullanacağımız Renk Değişkenleri (Temamız) */
+:root {
+    --primary-green: #2ecc71;    /* Canlı Yeşil (Başarı, Bağlantı, Butonlar) */
+    --dark-green: #27ae60;       /* Koyu Yeşil (Buton Hover efekti) */
+    --bg-dark: #1e272e;          /* Koyu Gri/Siyah (Arka plan veya kart detayları) */
+    --text-dark: #2c3e50;        /* Koyu Metin Rengi */
+    --bg-light: #f5f6fa;         /* Açık Gri/Beyaz Sayfa Arka Planı */
+    --white: #ffffff;            /* Saf Beyaz (Kartlar için) */
+}
+
+/* Genel Sayfa Ayarları */
+body {
+    background-color: var(--bg-light);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: var(--text-dark);
+    padding-top: 50px;
+    margin: 0;
+}
+
+/* Ana Kart Tasarımı (Formun durduğu kutu) */
+.connection-card {
+    background-color: var(--white);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+    padding: 35px;
+    border: 1px solid #e1e8ed;
+}
+
+/* Başlık Stili */
+.main-title {
+    color: var(--bg-dark);
+    font-weight: 700;
+    position: relative;
+    margin-bottom: 30px;
+}
+
+/* Başlığın altına şık bir yeşil çizgi efekti */
+.main-title::after {
+    content: '';
+    display: block;
+    width: 60px;
+    height: 4px;
+    background-color: var(--primary-green);
+    margin: 8px auto 0 auto;
+    border-radius: 2px;
+}
+
+/* Form Elemanları (İnputlar ve Seçim Kutuları) */
+.form-label {
+    font-weight: 600;
+    color: #485460;
+    font-size: 0.9rem;
+}
+
+.form-control, .form-select {
+    border: 2px solid #efefef;
+    border-radius: 8px;
+    padding: 10px 12px;
+    transition: all 0.3s ease;
+}
+
+/* İnputlara tıklandığında (Focus) yeşil yanma efekti */
+.form-control:focus, .form-select:focus {
+    border-color: var(--primary-green);
+    box-shadow: 0 0 0 0.2rem rgba(46, 204, 113, 0.15);
+    outline: none;
+}
+
+/* Bizim Özel Yeşil Butonumuz */
+.btn-connect {
+    background-color: var(--primary-green);
+    color: var(--white);
+    border: none;
+    border-radius: 8px;
+    padding: 12px;
+    font-weight: 600;
+    font-size: 1.1rem;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+    cursor: pointer;
+}
+
+/* Fareyle butonun üzerine gelince koyu yeşil olsun */
+.btn-connect:hover {
+    background-color: var(--dark-green);
+    color: var(--white);
+}
+
+/* Butona basılma hissi */
+.btn-connect:active {
+    transform: scale(0.98);
+}
+
+/* Sonuçların Gösterileceği Koyu Temalı Kutu */
+.result-card {
+    background-color: var(--bg-dark);
+    color: var(--white);
+    border-radius: 12px;
+    padding: 25px;
+    margin-top: 25px;
+    display: none; /* İlk başta gizli */
+}
+
+.result-card h5 strong {
+    color: var(--primary-green) !important;
+}
+
+/* Tablo Listesi Elemanları */
+.custom-list-item {
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #dcdde1;
+    margin-bottom: 5px;
+    border-radius: 6px !important;
+}
