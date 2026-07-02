@@ -1,363 +1,238 @@
-from flask import Flask, render_template, request, jsonify
-from sqlalchemy import create_engine, inspect, text
-import os
+from flask import Flask, request, jsonify, render_template
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import re
 
 app = Flask(__name__)
 
-# 1. Ana Sayfa Yönlendirmesi
+def get_db_connection(config):
+    return psycopg2.connect(
+        host=config.get('host'),
+        port=config.get('port', 5432),
+        user=config.get('user'),
+        password=config.get('password'),
+        database=config.get('database')
+    )
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# 2. Veri Tabanı Bağlantı ve Bilgi Alma Yönlendirmesi
+# 1. DATABASE CONNECTION & ULTIMATE SECURITY AUDIT ROUTE (11 VULNERABILITIES)
 @app.route('/connect', methods=['POST'])
-def connect_database():
+def connect_and_audit():
     data = request.json
-    db_type = data.get('db_type')
-    host = data.get('host')
-    port = data.get('port')
-    user = data.get('user')
-    password = data.get('password')
-    database = data.get('database')
-    
     try:
-        # Veri tabanı türüne göre Connection String (URI) oluşturma
-        if db_type == 'postgresql':
-            uri = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-        elif db_type == 'oracle':
-            uri = f"oracle+oracledb://{user}:{password}@{host}:{port}/?service_name={database}"
-        elif db_type == 'mysql':
-            uri = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
-        elif db_type == 'sqlite':
-            uri = f"sqlite:///{database}"
-        else:
-            return jsonify({'success': False, 'message': 'Desteklenmeyen veri tabanı türü!'}), 400
-
-        # Her veri tabanı sürücüsünün zaman aşımı (timeout) parametre adı farklıdır
-        if db_type == 'postgresql':
-            connect_args = {'connect_timeout': 5}
-        elif db_type == 'mysql':
-            connect_args = {'connect_timeout': 5}
-        else:
-            connect_args = {}
-
-        # Motoru oluştur
-        engine = create_engine(uri, connect_args=connect_args)
+        conn = get_db_connection(data)
+        cursor = conn.cursor()
         
-        # Bağlantıyı aç ve verileri çek
-        with engine.connect() as connection:
-            version_info = "Bilinmiyor"
-            if db_type == 'postgresql':
-                res = connection.execute(text("SELECT version();"))
-                version_info = res.fetchone()[0]
-            elif db_type == 'oracle':
-                res = connection.execute(text("SELECT banner FROM v$version WHERE rownum = 1"))
-                version_info = res.fetchone()[0]
-            elif db_type == 'mysql':
-                res = connection.execute(text("SELECT version();"))
-                version_info = res.fetchone()[0]
+        # Metadata Discovery
+        cursor.execute("SELECT version();")
+        version = cursor.fetchone()[0]
+        
+        cursor.execute("""
+            SELECT count(*) FROM information_schema.tables 
+            WHERE table_schema NOT IN ('pg_catalog', 'information_schema');
+        """)
+        table_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT count(*) FROM pg_stat_activity;")
+        active_connections = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT pg_size_pretty(pg_database_size(%s));", (data.get('database'),))
+        db_size = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT pg_encoding_to_char(encoding) FROM pg_database WHERE datname = %s;", (data.get('database'),))
+        db_encoding = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT current_schema();")
+        current_schema = cursor.fetchone()[0]
+        
+        # --- 11 CORE SİBER GÜVENLİK TARAMA DÖNGÜSÜ ---
+        vulnerabilities = []
+        critical_count = 0
+        medium_count = 0
+        low_count = 0
+        
+        # Kontrol 1: SUPERUSER Yetki Kontrolü
+        cursor.execute("SELECT rolsuper FROM pg_roles WHERE rolname = %s;", (data.get('user'),))
+        is_superuser = cursor.fetchone()
+        if is_superuser and is_superuser[0]:
+            vulnerabilities.append({
+                "title": "Excessive Privileges (SUPERUSER)",
+                "severity": "CRITICAL",
+                "desc": f"The user '{data.get('user')}' has SUPERUSER privileges. If compromised, an attacker gains full control."
+            })
+            critical_count += 1
+            
+        # Kontrol 2: Zayıf Şifre Kontrolü
+        if data.get('password') == data.get('user') or data.get('password') in ['123456', 'password', 'root', 'admin']:
+            vulnerabilities.append({
+                "title": "Weak or Predictable Password",
+                "severity": "CRITICAL",
+                "desc": "The database password is weak, easy to brute-force, or identical to the username."
+            })
+            critical_count += 1
 
-            # Veri tabanındaki tabloları listele
-            inspector = inspect(engine)
-            tables = inspector.get_table_names()
+        # Kontrol 3: SSL/TLS Şifreleme Durumu
+        cursor.execute("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();")
+        ssl_status = cursor.fetchone()
+        if not ssl_status or not ssl_status[0]:
+            vulnerabilities.append({
+                "title": "Unencrypted Connection (No SSL)",
+                "severity": "MEDIUM",
+                "desc": "Data is transmitted in cleartext. Vulnerable to Man-in-the-Middle (MitM) sniffing attacks."
+            })
+            medium_count += 1
+            
+        # Kontrol 4: Standart Port Kullanımı
+        if str(data.get('port')) == '5432':
+            vulnerabilities.append({
+                "title": "Default Port Exposure",
+                "severity": "LOW",
+                "desc": "Database is running on default port 5432. Automated bots target default ports first."
+            })
+            low_count += 1
 
-        # Başarılı sonucu JSON olarak ön yüze (frontend) fırlat
+        # Kontrol 5: Public Şeması İzin Kontrolü
+        cursor.execute("""
+            SELECT has_schema_privilege('public', 'CREATE') 
+            WHERE EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'public');
+        """)
+        public_create_priv = cursor.fetchone()
+        if public_create_priv and public_create_priv[0]:
+            vulnerabilities.append({
+                "title": "Insecure Public Schema Permissions",
+                "severity": "MEDIUM",
+                "desc": "Any authenticated user can create objects in the 'public' schema. This leaves the system vulnerable to unauthorized database modification."
+            })
+            medium_count += 1
+
+        # Kontrol 6: Şifre Kriptolama Algoritması Kontrolü
+        cursor.execute("SHOW password_encryption;")
+        crypto_method = cursor.fetchone()[0]
+        if 'md5' in crypto_method.lower():
+            vulnerabilities.append({
+                "title": "Weak Password Hashing Method (MD5)",
+                "severity": "MEDIUM",
+                "desc": "The database uses MD5 encryption for stored passwords. MD5 is cryptographically broken and prone to rainbow-table attacks."
+            })
+            medium_count += 1
+
+        # Kontrol 7: Sürüm Güncelliği Kontrolü (Outdated Version)
+        version_match = re.search(r"PostgreSQL (\d+)", version)
+        if version_match:
+            major_version = int(version_match.group(1))
+            if major_version <= 15:
+                vulnerabilities.append({
+                    "title": "Outdated Database Version",
+                    "severity": "MEDIUM",
+                    "desc": f"The database is running legacy version {major_version}. Older major versions lack critical stability and recent security patches."
+                })
+                medium_count += 1
+
+        # Kontrol 8: Sınırsız Bağlantı Limiti Kontrolü
+        cursor.execute("SELECT rolconnlimit FROM pg_roles WHERE rolname = %s;", (data.get('user'),))
+        conn_limit = cursor.fetchone()
+        if conn_limit and conn_limit[0] == -1:
+            vulnerabilities.append({
+                "title": "Unlimited Connection Settings",
+                "severity": "LOW",
+                "desc": f"The user '{data.get('user')}' has an unlimited connection allocation limit (-1). This can expose resources to Denial of Service (DoS) exhaustion."
+            })
+            low_count += 1
+
+        # Kontrol 9: Row-Level Security (RLS) Kontrolü
+        cursor.execute("""
+            SELECT count(*) FROM pg_tables 
+            WHERE schemaname = 'public' AND rowsecurity = false;
+        """)
+        non_rls_tables = cursor.fetchone()[0]
+        if non_rls_tables > 0:
+            vulnerabilities.append({
+                "title": "Row-Level Security (RLS) Disabled",
+                "severity": "LOW",
+                "desc": "Row-Level Security is disabled on discoverable tables. Users with table access can read all rows implicitly."
+            })
+            low_count += 1
+
+        # Kontrol 10: Log Connections Kontrolü (Information Disclosure)
+        cursor.execute("SHOW log_connections;")
+        log_conn = cursor.fetchone()[0]
+        if log_conn.lower() == 'off':
+            vulnerabilities.append({
+                "title": "Insecure Session Logging (Audit Trail Missing)",
+                "severity": "LOW",
+                "desc": "Database connection logging is disabled. Security forensics cannot trace malicious login sequences if an incident occurs."
+            })
+            low_count += 1
+
+        # Kontrol 11: Shared Buffers Bellek Sıkılaştırma Taraması
+        cursor.execute("SHOW shared_buffers;")
+        buffers = cursor.fetchone()[0]
+        if 'mb' in buffers.lower() and int(re.findall(r'\d+', buffers)[0]) < 128:
+            vulnerabilities.append({
+                "title": "Suboptimal Shared Memory (Potential DoS Vulnerability)",
+                "severity": "LOW",
+                "desc": "The shared_buffers parameter is misconfigured or too low. Aggressive heavy scan queries can lock up service resources."
+            })
+            low_count += 1
+
+        cursor.close()
+        conn.close()
+        
         return jsonify({
-            'success': True,
-            'message': 'Bağlantı Başarılı!',
-            'details': {
-                'version': version_info,
-                'tables': tables if tables else ["Hiç tablo bulunamadı veya erişim izni yok."]
+            "success": True, 
+            "message": "Database Discovery & Ultimate 11-Point Audit Completed!", 
+            "details": {
+                "version": version,
+                "table_count": table_count,
+                "active_connections": active_connections,
+                "vulnerabilities": vulnerabilities,
+                "info": {
+                    "db_name": data.get('database'),
+                    "db_host": data.get('host'),
+                    "db_port": data.get('port'),
+                    "db_user": data.get('user'),
+                    "db_size": db_size,
+                    "db_encoding": db_encoding,
+                    "current_schema": current_schema
+                },
+                "stats": {
+                    "Critical": critical_count,
+                    "Medium": medium_count,
+                    "Low": low_count
+                }
             }
         })
-
     except Exception as e:
-        # Bir hata oluşursa ön yüze hata mesajını gönder
-        return jsonify({'success': False, 'message': f"Bağlantı Hatası: {str(e)}"}), 200
+        return jsonify({"success": False, "message": f"Connection/Audit Error: {str(e)}"})
+
+# 2. GENERAL SQL EXECUTOR ROUTE
 @app.route('/execute_sql', methods=['POST'])
 def execute_sql():
     data = request.json
-    db_type = data.get('db_type')
-    host = data.get('host')
-    port = data.get('port')
-    user = data.get('user')
-    password = data.get('password')
-    database = data.get('database')
-    sql_query = data.get('sql_query') # Arayüzden gelen SQL sorgusu
-        
-    if not sql_query:
-        return jsonify({'success': False, 'message': 'Lütfen bir SQL sorgusu girin!'})
-
-    # Veri tabanı bağlantı dizesini yeniden oluşturuyoruz
+    query = data.get('sql_query', '').strip()
+    if not query:
+        return jsonify({"success": False, "message": "Query cannot be empty."})
     try:
-        if db_type == 'postgresql':
-            uri = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-        elif db_type == 'oracle':
-            uri = f"oracle+oracledb://{user}:{password}@{host}:{port}/?service_name={database}"
-        elif db_type == 'mysql':
-            uri = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
-        elif db_type == 'sqlite':
-            uri = f"sqlite:///{database}"
+        conn = get_db_connection(data)
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute(query)
+        is_select = query.upper().startswith("SELECT")
+        rows = []
+        columns = []
+        if is_select:
+            rows = cursor.fetchall()
+            if cursor.description:
+                columns = [desc[0] for desc in cursor.description]
         else:
-            return jsonify({'success': False, 'message': 'Desteklenmeyen veri tabanı!'}), 400
-
-        engine = create_engine(uri)
-        
-        with engine.connect() as connection:
-            # SQL sorgusunu güvenli bir şekilde çalıştırılabilir formata çeviriyoruz
-            result = connection.execute(text(sql_query))
-            
-            # Eğer sorgu bir SELECT sorgusuysa (veri döndürüyorsa)
-            if result.returns_rows:
-                columns = list(result.keys()) # Sütun isimleri (id, isim, bolum vb.)
-                rows = [dict(row._mapping) for row in result.fetchall()] # Gelen satırlar
-                
-                # Tarih veya özel veri tipleri çıkarsa JSadscvdfvasdasasdasdasdsndjansjbhbjON hata vermesin diye string'e çeviriyoruz
-                for row in rows:
-                    for key, value in row.items():
-                        if value is not None and not isinstance(value, (int, float, str, bool)):
-                            row[key] = str(value)
-
-                return jsonify({
-                    'success': True,
-                    'is_select': True,
-                    'message': f"{len(rows)} satır getirildi.",
-                    'columns': columns,
-                    'rows': rows
-                })
-            else:
-                # INSERT, UPDATE, DELETE veya CREATE sorguları için (satır döndürmeyenler)
-                connection.commit() # Değişiklikleri veri tabanına kaydet
-                return jsonify({
-                    'success': True,
-                    'is_select': False,
-                    'message': f"Sorgu başarıyla çalıştırıldı. Etkilenen satır sayısı: {result.rowcount}"
-                })
-
+            conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({"success": True, "message": "Query executed successfully.", "is_select": is_select, "columns": columns, "rows": rows})
     except Exception as e:
-        return jsonify({'success': False, 'message': f"SQL Hatası: {str(e)}"}), 200
-        
-# ====================================================================
-# YENİ: ÖĞRENCİLERİ OTOMATİK LİSTELEME YÖNLENDİRMESİ (READ)
-# ====================================================================
-@app.route('/get_students', methods=['POST'])
-def get_students():
-    data = request.json
-    db_type = data.get('db_type')
-    host = data.get('host')
-    port = data.get('port')
-    user = data.get('user')
-    password = data.get('password')
-    database = data.get('database')
+        return jsonify({"success": False, "message": f"SQL Error: {str(e)}"})
 
-    try:
-        if db_type == 'postgresql':
-            uri = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-        elif db_type == 'mysql':
-            uri = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
-        else:
-            return jsonify({'success': False, 'message': 'Desteklenmeyen veri tabanı!'})
-
-        engine = create_engine(uri)
-        with engine.connect() as connection:
-            # Tablo yoksa ortalama (GNO) sütunu dahil otomatik oluşturur
-            if db_type == 'postgresql':
-                connection.execute(text("""
-                    CREATE TABLE IF NOT EXISTS ogrenciler (
-                        id SERIAL PRIMARY KEY,
-                        isim VARCHAR(100),
-                        bolum VARCHAR(100),
-                        ortalama NUMERIC(3,2) DEFAULT 0.00
-                    );
-                """))
-                connection.commit()
-                
-                # Eğer tablo daha önceden oluştup içi boş kaldıysa ortalama sütununu zorla ekler
-                try:
-                    connection.execute(text("ALTER TABLE ogrenciler ADD COLUMN IF NOT EXISTS ortalama NUMERIC(3,2) DEFAULT 0.00;"))
-                    connection.commit()
-                except:
-                    pass
-            
-            elif db_type == 'mysql':
-                connection.execute(text("""
-                    CREATE TABLE IF NOT EXISTS ogrenciler (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        isim VARCHAR(100),
-                        bolum VARCHAR(100),
-                        ortalama DECIMAL(3,2) DEFAULT 0.00
-                    );
-                """))
-                connection.commit()
-
-            # Öğrencileri ortalamalarıyla birlikte veri tabanından çeker
-            res = connection.execute(text("SELECT id, isim, bolum, ortalama FROM ogrenciler ORDER BY id DESC;"))
-            students = []
-            for row in res.fetchall():
-                mapping = dict(row._mapping)
-                if mapping.get('ortalama') is not None:
-                    mapping['ortalama'] = float(mapping['ortalama'])
-                students.append(mapping)
-
-        return jsonify({'success': True, 'students': students})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-    try:
-        if db_type == 'postgresql':
-            uri = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-        elif db_type == 'mysql':
-            uri = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
-        else:
-            return jsonify({'success': False, 'message': 'Bu özellik şu an PostgreSQL ve MySQL için aktiftir.'})
-
-        engine = create_engine(uri)
-        with engine.connect() as connection:
-            # Önce eğer 'ogrenciler' tablosu yoksa otomatik oluştursun (Kullanıcıya kolaylık)
-            connection.execute(text("""
-                CREATE TABLE IF NOT EXISTS ogrenciler (
-                    id SERIAL PRIMARY KEY,
-                    isim VARCHAR(100),
-                    bolum VARCHAR(100)
-                );
-            """))
-            connection.commit()
-
-            # Öğrencileri çek
-            res = connection.execute(text("SELECT id, isim, bolum FROM ogrenciler ORDER BY id DESC;"))
-            students = [dict(row._mapping) for row in res.fetchall()]
-
-        return jsonify({'success': True, 'students': students})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-# ====================================================================
-# YENİ: ÖĞRENCİ EKLEME YÖNLENDİRMESİ (CREATE)
-# ====================================================================
-@app.route('/add_student', methods=['POST'])
-def add_student():
-    data = request.json
-    db_type = data.get('db_type')
-    host = data.get('host')
-    port = data.get('port')
-    user = data.get('user')
-    password = data.get('password')
-    database = data.get('database')
-    
-    student_name = data.get('student_name')
-    student_dept = data.get('student_dept')
-    student_avg = data.get('student_avg', 0.00) # Ön yüzden gelen ortalama (yoksa 0.00)
-
-    if not student_name or not student_dept:
-        return jsonify({'success': False, 'message': 'İsim ve Bölüm alanları boş bırakılamaz!'})
-
-    try:
-        if db_type == 'postgresql':
-            uri = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-        elif db_type == 'mysql':
-            uri = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
-        else:
-            return jsonify({'success': False, 'message': 'Desteklenmeyen veri tabanı!'})
-
-        engine = create_engine(uri)
-        with engine.connect() as connection:
-            # Sorguya 'ortalama' sütununu ve ':avg' parametresini ekledik
-            connection.execute(
-                text("INSERT INTO ogrenciler (isim, bolum, ortalama) VALUES (:name, :dept, :avg);"),
-                {"name": student_name, "dept": student_dept, "avg": student_avg}
-            )
-            connection.commit()
-
-        return jsonify({'success': True, 'message': 'Öğrenci başarıyla eklendi!'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    
-    # Eklenecek öğrenci bilgileri
-        return jsonify({'success': True, 'message': 'Öğrenci başarıyla eklendi!'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-    # ====================================================================
-# YENİ: ÖĞRENCİ SİLME YÖNLENDİRMESİ (DELETE)
-# ====================================================================
-@app.route('/delete_student', methods=['POST'])
-def delete_student():
-    data = request.json
-    db_type = data.get('db_type')
-    host = data.get('host')
-    port = data.get('port')
-    user = data.get('user')
-    password = data.get('password')
-    database = data.get('database')
-    student_id = data.get('student_id') # Silinecek öğrencinin ID'si
-
-    if not student_id:
-        return jsonify({'success': False, 'message': 'Geçersiz Öğrenci ID!'})
-
-    try:
-        if db_type == 'postgresql':
-            uri = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-        elif db_type == 'mysql':
-            uri = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
-        else:
-            return jsonify({'success': False, 'message': 'Desteklenmeyen veri tabanı!'})
-
-        engine = create_engine(uri)
-        with engine.connect() as connection:
-            connection.execute(
-                text("DELETE FROM ogrenciler WHERE id = :id;"),
-                {"id": student_id}
-            )
-            connection.commit()
-
-        return jsonify({'success': True, 'message': 'Öğrenci başarıyla silindi!'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-# ====================================================================
-# YENİ: ÖĞRENCİ GÜNCELLEME YÖNLENDİRMESİ (UPDATE)
-# ====================================================================
-@app.route('/update_student', methods=['POST'])
-def update_student():
-    data = request.json
-    db_type = data.get('db_type')
-    host = data.get('host')
-    port = data.get('port')
-    user = data.get('user')
-    password = data.get('password')
-    database = data.get('database')
-    
-    student_id = data.get('student_id')
-    student_name = data.get('student_name')
-    student_dept = data.get('student_dept')
-    student_avg = data.get('student_avg', 0.00) # Ön yüzden gelen güncel ortalama
-
-    if not student_id or not student_name or not student_dept:
-        return jsonify({'success': False, 'message': 'Tüm alanların doldurulması zorunludur!'})
-
-    try:
-        if db_type == 'postgresql':
-            uri = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-        elif db_type == 'mysql':
-            uri = f"mysql+pymysql://{user}:{password}@{host}:{port}/{database}"
-        else:
-            return jsonify({'success': False, 'message': 'Desteklenmeyen veri tabanı!'})
-
-        engine = create_engine(uri)
-        with engine.connect() as connection:
-            # UPDATE sorgusuna 'ortalama = :avg' parametresini iliştirdik
-            connection.execute(
-                text("UPDATE ogrenciler SET isim = :name, bolum = :dept, ortalama = :avg WHERE id = :id;"),
-                {"name": student_name, "dept": student_dept, "avg": student_avg, "id": student_id}
-            )
-            connection.commit()
-
-        return jsonify({'success': True, 'message': 'Öğrenci bilgileri güncellendi!'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
-
-    
-# 3. Uygulamayı Başlatma Bloğu
 if __name__ == '__main__':
-    if not os.path.exists('templates'):
-        os.makedirs('templates')
     app.run(debug=True, port=5000)
