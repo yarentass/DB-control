@@ -18,7 +18,107 @@ def get_db_connection(config):
 def index():
     return render_template('index.html')
 
-# 1. DATABASE CONNECTION & ULTIMATE SECURITY AUDIT ROUTE (11 VULNERABILITIES)
+# SIMULATED SECURITY AUDIT LOG DATA GENERATOR
+def generate_audit_logs(script_id):
+    if script_id == "pg_inject_test":
+        return [
+            "[CRITICAL] Input pattern query validation failed.",
+            "[WARNING] Application layer input sanitizer bypass detected via logical tautology ('1'='1').",
+            "[ADVISORY] Enforce parameterized Prepared Statements immediately to remediate SQL Injection risk vectors."
+        ]
+    elif script_id == "pg_brute_test":
+        return [
+            "[INFO] Evaluating authentication backend directory policies...",
+            "[WARNING] High density dictionary enumeration susceptibility discovered on administrative user accounts.",
+            "[ADVISORY] Configure robust account lockout triggers inside pg_hba.conf configuration mappings."
+        ]
+    elif script_id == "pg_audit_check":
+        return [
+            "[INFO] Checking local_preload_libraries directive strings...",
+            "[CRITICAL] Operational policy audit framework failure: 'pgaudit' module extension is NOT initialized.",
+            "[ADVISORY] Append 'pgaudit' under server startup parameters to ensure full structural transaction logging."
+        ]
+    elif script_id == "pg_perm_leak":
+        return [
+            "[INFO] Iterating structural privileges on enterprise schemas...",
+            "[WARNING] Implicit read grants mapped to non-administrative global standard database identity clusters.",
+            "[ADVISORY] Run REVOKE access definitions to restrict target infrastructure access vectors."
+        ]
+    elif script_id == "my_anon_scan":
+        return [
+            "[INFO] Auditing default system internal users catalog rows...",
+            "[CRITICAL] Active anonymous user account map exposure uncovered (blank string identifier).",
+            "[ADVISORY] Drop all legacy empty string accounts using 'DROP USER' operations."
+        ]
+    elif script_id == "my_priv_check":
+        return [
+            "[INFO] Validating data extraction payload permissions...",
+            "[WARNING] Administrative FILE write flags allocated to web application runtime connector accounts.",
+            "[ADVISORY] Disable global structural FILE privileges to prevent arbitrary backdoors initialization."
+        ]
+    elif script_id == "my_pwd_check":
+        return [
+            "[INFO] Checking crypt-hashing library configurations...",
+            "[WARNING] Found older unhardened password authentication plugins active.",
+            "[ADVISORY] Enforce modern 'caching_sha2_password' across all enterprise connections."
+        ]
+    elif script_id == "ora_def_check":
+        return [
+            "[INFO] Checking integrity state of dictionary baseline records...",
+            "[CRITICAL] Default installation administrative user accounts remain in active configuration states.",
+            "[ADVISORY] Lock default schema access parameters and change legacy package keys."
+        ]
+    elif script_id == "ora_audit_pol":
+        return [
+            "[INFO] Analyzing target monitoring cluster system tables...",
+            "[WARNING] Critical database management events are bypassable under legacy logging rules.",
+            "[ADVISORY] Initialize Oracle Unified Auditing control profiles on corporate nodes."
+        ]
+    elif script_id == "ora_profile_res":
+        return [
+            "[INFO] Evaluating parameter dictionary baseline policies...",
+            "[WARNING] Account lock triggers configured with insecure infinite enumeration flags.",
+            "[ADVISORY] Implement strong threshold criteria on FAILED_LOGIN_ATTEMPTS values."
+        ]
+    return ["[INFO] Evaluation completed. No explicit hardening exceptions caught."]
+
+# NEW ROUTE: POLICY SIMULATION & DEFENSIVE COMPLIANCE AUDIT
+@app.route('/simulate_policy', methods=['POST'])
+def simulate_policy():
+    data = request.json
+    db_type = data.get('db_type', 'postgresql')
+    script_id = data.get('script_id', '')
+    
+    # Extract query representation text
+    query_text = "N/A"
+    test_name = "Generic Compliance Audit"
+    
+    scripts = {
+        "pg_inject_test": ("Simulate SQL Injection Blind Input Testing", "SELECT * FROM users WHERE username = 'admin' OR '1'='1';"),
+        "pg_brute_test": ("Analyze Role Authentication Settings", "SELECT rolname, rolpassword FROM pg_authid WHERE rolname='postgres';"),
+        "pg_audit_check": ("Audit Framework Trail Activation Status", "SHOW local_preload_libraries;"),
+        "pg_perm_leak": ("Check Insecure Object Grants", "SELECT grantee, privilege_type FROM role_table_grants;"),
+        "my_anon_scan": ("Simulate Anonymous User Identity Probing", "SELECT User, Host FROM mysql.user WHERE User = '';"),
+        "my_priv_check": ("Verify File System Injection Access Privilege", "SELECT User, Host, File_priv FROM mysql.user WHERE File_priv = 'Y';"),
+        "my_pwd_check": ("Audit Legacy Authentication Methods", "SELECT User, Host, plugin FROM mysql.user;"),
+        "ora_def_check": ("Scan Default Institutional Roles", "SELECT username, account_status FROM dba_users;"),
+        "ora_audit_pol": ("Evaluate Active Unified Auditing Configuration Schemes", "SELECT policy_name, enabled FROM cdb_unified_audit_policies;"),
+        "ora_profile_res": ("Test Dictionary Connection Exhaustion Policies", "SELECT profile, resource_name, limit FROM dba_profiles;")
+    }
+    
+    if script_id in scripts:
+        test_name, query_text = scripts[script_id]
+        
+    logs = generate_audit_logs(script_id)
+    
+    return jsonify({
+        "engine": db_type,
+        "test_run": test_name,
+        "query": query_text,
+        "logs": logs
+    })
+
+# DATABASE CONNECTION & ULTIMATE SECURITY AUDIT ROUTE (11 VULNERABILITIES)
 @app.route('/connect', methods=['POST'])
 def connect_and_audit():
     data = request.json

@@ -11,20 +11,30 @@
         [data-bs-theme="dark"] {
             --body-bg: #121212;
             --card-bg: #1e1e1e;
+            --inner-card-bg: #222222;
             --input-bg: #2a2a2a;
             --text-color: #e0e0e0;
             --border-color: #333;
             --title-color: #198754;
             --fix-box-bg: #151515;
+            --terminal-bg: #090909;
+            --terminal-text: #2ecc71; /* Canlı Siber Yeşil */
+            --preview-bg: #1a1a1a;
+            --preview-text: #00d2ff; /* Parlak Mavi SQL metni */
         }
         [data-bs-theme="light"] {
             --body-bg: #f8f9fa;
             --card-bg: #ffffff;
+            --inner-card-bg: #f1f3f5;
             --input-bg: #ffffff;
             --text-color: #212529;
             --border-color: #dee2e6;
             --title-color: #146c43;
-            --fix-box-bg: #f1f3f5;
+            --fix-box-bg: #e9ecef;
+            --terminal-bg: #f1f3f5;
+            --terminal-text: #146c43; /* Gözü yormayan koyu yeşil denetim logu */
+            --preview-bg: #f1f3f5;
+            --preview-text: #0b5ed7; /* Okunaklı koyu mavi SQL metni */
         }
 
         body { background-color: var(--body-bg); color: var(--text-color); transition: background 0.3s, color 0.3s; }
@@ -45,6 +55,35 @@
         .info-table th { color: #198754 !important; font-weight: 600; width: 35%; }
         .info-table td { font-family: monospace; }
         
+        .vuln-item-card {
+            background-color: var(--inner-card-bg) !important;
+            border: 1px solid var(--border-color) !important;
+            color: var(--text-color) !important;
+            transition: all 0.3s ease;
+        }
+
+        /* Query Content View Önizleme Kutusu artık dinamik */
+        #scriptContentView {
+            background-color: var(--preview-bg) !important;
+            color: var(--preview-text) !important;
+            border: 1px solid var(--border-color) !important;
+            transition: all 0.3s ease;
+        }
+
+        /* Terminal Box artık dinamik */
+        .terminal-box {
+            background-color: var(--terminal-bg);
+            border: 1px solid var(--border-color);
+            color: var(--terminal-text);
+            font-family: 'Courier New', Courier, monospace;
+            padding: 15px;
+            border-radius: 6px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            transition: all 0.3s ease;
+        }
+
         .brand-icon {
             color: #198754;
             text-shadow: 0 0 15px rgba(25, 135, 84, 0.6);
@@ -55,7 +94,6 @@
             100% { transform: scale(1.03); opacity: 1; }
         }
 
-        /* Tema Değiştirme Butonu Stili */
         .theme-toggle-btn {
             position: fixed;
             top: 20px;
@@ -75,7 +113,7 @@
 </head>
 <body>
 
-<!-- YENİ: Sağ Üst Köşedeki Tema Değiştirme Butonu -->
+<!-- Sağ Üst Köşedeki Tema Değiştirme Butonu -->
 <button id="themeToggle" class="btn btn-outline-success theme-toggle-btn" title="Toggle Light/Dark Mode">
     <i class="fa-solid fa-sun" id="themeIcon"></i>
 </button>
@@ -227,13 +265,35 @@
                     </div>
                 </div>
 
+                <!-- SECURITY AUDIT & POLICY SIMULATION CONSOLE -->
+                <div id="policySimulationPanel" class="mt-4 border-top pt-3" style="display: none;">
+                    <h5 class="text-danger mb-3"><strong><i class="fa-solid fa-shield-halved me-2"></i>Security Audit & Policy Simulation Console</strong></h5>
+                    <p class="text-muted small">Select a configuration template to evaluate potential defensive response policies and access auditing diagnostics.</p>
+                    
+                    <div class="mb-3">
+                        <label class="form-label text-info fw-bold">Select Audit / Assessment Script:</label>
+                        <select class="form-select font-monospace" id="policyScriptSelector"></select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label text-warning fw-bold">Query Content View:</label>
+                        <pre id="scriptContentView" class="p-2 bg-dark rounded text-info font-monospace small" style="border: 1px solid #444; max-height: 100px; overflow-y: auto;">Select a script template above...</pre>
+                    </div>
+
+                    <button type="button" id="btnRunSimulation" class="btn btn-danger w-100 fw-bold btn-sm mb-3">Execute Compliance Audit Test</button>
+                    
+                    <div id="simulationOutputBox" style="display: none;">
+                        <label class="form-label text-success fw-bold">Audit & Policy Diagnostic Results:</label>
+                        <div id="terminalOutput" class="terminal-box"></div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>
 </div>
 
 <script>
-// --- TEMA DEĞİŞTİRME MANTIĞI (DARK / LIGHT MODE) ---
 const themeToggle = document.getElementById('themeToggle');
 const themeIcon = document.getElementById('themeIcon');
 const htmlEl = document.documentElement;
@@ -248,7 +308,6 @@ themeToggle.addEventListener('click', () => {
     }
 });
 
-// --- REMEDIATION KNOWLEDGE BASE ---
 const remediationDatabase = {
     "Excessive Privileges (SUPERUSER)": {
         steps: "Unnecessary administrative privileges present a critical vector for attackers. Enforce strict 'Least Privilege' controls across all system users.",
@@ -296,12 +355,63 @@ const remediationDatabase = {
     }
 };
 
+const databasePolicyScripts = {
+    "postgresql": [
+        { id: "pg_inject_test", name: "Simulate SQL Injection Blind Input Testing", code: "SELECT * FROM users WHERE username = 'admin' OR '1'='1';" },
+        { id: "pg_brute_test", name: "Analyze Role Authentication Settings (Brute-Force Vulnerability Check)", code: "SELECT rolname, rolpassword FROM pg_authid WHERE rolname='postgres';" },
+        { id: "pg_audit_check", name: "Audit Framework Trail Activation Status", code: "SHOW local_preload_libraries; -- Check for pgaudit activation" },
+        { id: "pg_perm_leak", name: "Check Insecure Object Grants and Schema Leakage", code: "SELECT grantee, privilege_type FROM information_schema.role_table_grants WHERE table_name = 'users';" }
+    ],
+    "mysql": [
+        { id: "my_anon_scan", name: "Simulate Anonymous User Identity Probing", code: "SELECT User, Host FROM mysql.user WHERE User = '';" },
+        { id: "my_priv_check", name: "Verify File System Injection Access Privilege (LOAD DATA INFILE)", code: "SELECT User, Host, File_priv FROM mysql.user WHERE File_priv = 'Y';" },
+        { id: "my_pwd_check", name: "Audit Legacy Authentication Methods (Old Passwords Check)", code: "SELECT User, Host, plugin FROM mysql.user WHERE plugin = 'mysql_native_password';" }
+    ],
+    "oracle": [
+        { id: "ora_def_check", name: "Scan Default Institutional Roles (DBA Account Access Probing)", code: "SELECT username, account_status FROM dba_users WHERE username IN ('SYS', 'SYSTEM', 'SCOTT');" },
+        { id: "ora_audit_pol", name: "Evaluate Active Unified Auditing Configuration Schemes", code: "SELECT policy_name, enabled FROM cdb_unified_audit_policies;" },
+        { id: "ora_profile_res", name: "Test Dictionary Connection Exhaustion Policies (DoS Limits)", code: "SELECT profile, resource_name, limit FROM dba_profiles WHERE resource_name = 'FAILED_LOGIN_ATTEMPTS';" }
+    ]
+};
+
+function updateScriptSelector() {
+    const dbType = document.getElementById('db_type').value;
+    const selector = document.getElementById('policyScriptSelector');
+    const contentView = document.getElementById('scriptContentView');
+    
+    selector.innerHTML = '';
+    const items = databasePolicyScripts[dbType] || [];
+    
+    items.forEach(script => {
+        let opt = document.createElement('option');
+        opt.value = script.id;
+        opt.textContent = script.name;
+        selector.appendChild(opt);
+    });
+
+    if (items.length > 0) {
+        contentView.textContent = items[0].code;
+    } else {
+        contentView.textContent = "No scripts available for this configuration.";
+    }
+}
+
 document.getElementById('db_type').addEventListener('change', function() {
     const portInput = document.getElementById('port');
     if (this.value === 'postgresql') portInput.value = '5432';
     if (this.value === 'mysql') portInput.value = '3306';
     if (this.value === 'oracle') portInput.value = '1521';
+    updateScriptSelector();
 });
+
+document.getElementById('policyScriptSelector').addEventListener('change', function() {
+    const dbType = document.getElementById('db_type').value;
+    const items = databasePolicyScripts[dbType] || [];
+    const selected = items.find(x => x.id === this.value);
+    document.getElementById('scriptContentView').textContent = selected ? selected.code : "";
+});
+
+updateScriptSelector();
 
 function getDbConfig() {
     return {
@@ -374,10 +484,11 @@ document.getElementById('dbForm').addEventListener('submit', async (e) => {
                     
                     const guide = remediationDatabase[v.title] || { steps: "Apply generic system hardening guidelines.", solution: "N/A" };
                     
+                    // COZUM: Hardcoded bg-dark kaldırıldı, yerine vuln-item-card CSS sınıfı entegre edildi.
                     vulnList.innerHTML += `
-                        <div class="card p-3 mb-2 bg-dark text-white border-secondary">
+                        <div class="card p-3 mb-2 vuln-item-card">
                             <div class="d-flex justify-content-between align-items-center">
-                                <strong class="text-white" style="font-size:14px;">${v.title}</strong>
+                                <strong style="font-size:14px;">${v.title}</strong>
                                 <div>
                                     <span class="badge ${badgeClass} px-3 py-1 me-2" style="font-size:11px; font-weight:bold;">${v.severity}</span>
                                     <button class="btn btn-sm btn-outline-warning py-0 px-2" style="font-size:11px;" type="button" data-bs-toggle="collapse" data-bs-target="#fix-${index}">How to Fix</button>
@@ -386,11 +497,11 @@ document.getElementById('dbForm').addEventListener('submit', async (e) => {
                             <p class="text-muted small mb-0 mt-2" style="font-size:12px; line-height:1.5;">${v.desc}</p>
                             
                             <div class="collapse" id="fix-${index}">
-                                <div class="fix-box text-light small">
+                                <div class="fix-box small">
                                     <div class="mb-2 text-warning"><strong>🛡️ Remediation Steps:</strong></div>
-                                    <p class="mb-2" style="font-size:12px; color:#ccc;">${guide.steps}</p>
+                                    <p class="mb-2" style="font-size:12px;">${guide.steps}</p>
                                     <div class="text-success mb-1"><strong>💻 Fix / SQL Command:</strong></div>
-                                    <div class="p-2 rounded font-monospace text-info bg-black" style="font-size:11px; border:1px solid #222;">
+                                    <div class="p-2 rounded font-monospace text-info bg-black" style="font-size:11px; border:1px solid #444;">
                                         ${guide.solution}
                                     </div>
                                 </div>
@@ -402,6 +513,7 @@ document.getElementById('dbForm').addEventListener('submit', async (e) => {
 
             document.getElementById('sqlPanel').style.display = 'block';
             document.getElementById('corporatePanel').style.display = 'block';
+            document.getElementById('policySimulationPanel').style.display = 'block';
         } else {
             toastEl.className = "toast align-items-center text-white bg-danger border-0 shadow-lg";
             toastMsg.innerText = "❌ " + data.message;
@@ -414,7 +526,41 @@ document.getElementById('dbForm').addEventListener('submit', async (e) => {
     }
 });
 
-// SQL CONSOLE
+document.getElementById('btnRunSimulation').addEventListener('click', async () => {
+    const dbType = document.getElementById('db_type').value;
+    const scriptId = document.getElementById('policyScriptSelector').value;
+    const outputBox = document.getElementById('simulationOutputBox');
+    const terminal = document.getElementById('terminalOutput');
+    
+    outputBox.style.display = 'block';
+    terminal.innerHTML = `[i] Initializing Policy Diagnostics for Engine: ${dbType.toUpperCase()}...\n[i] Loading test profile sequence token...\n`;
+
+    try {
+        const response = await fetch('/simulate_policy', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...getDbConfig(),
+                script_id: scriptId
+            })
+        });
+        const data = await response.json();
+        
+        let formattedLog = `[+] Target Engine Context: ${data.engine.toUpperCase()}\n`;
+        formattedLog += `[+] Verification Action: ${data.test_run}\n`;
+        formattedLog += `[~] Query Simulated: ${data.query}\n\n`;
+        formattedLog += `------------------ SECURITY LOG VIEW ------------------\n`;
+        
+        data.logs.forEach(log => {
+            formattedLog += `${log}\n`;
+        });
+        
+        terminal.innerText = formattedLog;
+    } catch (err) {
+        terminal.innerText = "[-] Error connecting to simulation endpoint route.";
+    }
+});
+
 document.getElementById('btnExecuteSql').addEventListener('click', async () => {
     const sqlQuery = document.getElementById('sqlQuery').value;
     const sqlResultBox = document.getElementById('sqlResultBox');
