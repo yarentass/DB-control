@@ -18,9 +18,9 @@
             --title-color: #198754;
             --fix-box-bg: #151515;
             --terminal-bg: #090909;
-            --terminal-text: #2ecc71; /* Canlı Siber Yeşil */
+            --terminal-text: #2ecc71;
             --preview-bg: #1a1a1a;
-            --preview-text: #00d2ff; /* Parlak Mavi SQL metni */
+            --preview-text: #00d2ff;
         }
         [data-bs-theme="light"] {
             --body-bg: #f8f9fa;
@@ -32,9 +32,9 @@
             --title-color: #146c43;
             --fix-box-bg: #e9ecef;
             --terminal-bg: #f1f3f5;
-            --terminal-text: #146c43; /* Gözü yormayan koyu yeşil denetim logu */
+            --terminal-text: #146c43;
             --preview-bg: #f1f3f5;
-            --preview-text: #0b5ed7; /* Okunaklı koyu mavi SQL metni */
+            --preview-text: #0b5ed7;
         }
 
         body { background-color: var(--body-bg); color: var(--text-color); transition: background 0.3s, color 0.3s; }
@@ -62,7 +62,6 @@
             transition: all 0.3s ease;
         }
 
-        /* Query Content View Önizleme Kutusu artık dinamik */
         #scriptContentView {
             background-color: var(--preview-bg) !important;
             color: var(--preview-text) !important;
@@ -70,7 +69,6 @@
             transition: all 0.3s ease;
         }
 
-        /* Terminal Box artık dinamik */
         .terminal-box {
             background-color: var(--terminal-bg);
             border: 1px solid var(--border-color);
@@ -113,12 +111,10 @@
 </head>
 <body>
 
-<!-- Sağ Üst Köşedeki Tema Değiştirme Butonu -->
 <button id="themeToggle" class="btn btn-outline-success theme-toggle-btn" title="Toggle Light/Dark Mode">
     <i class="fa-solid fa-sun" id="themeIcon"></i>
 </button>
 
-<!-- Sağ Üst Köşede Çıkacak Dinamik Toast Bildirimi -->
 <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1100;">
     <div id="securityToast" class="toast align-items-center text-white bg-success border-0 shadow-lg" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="4000">
         <div class="d-flex">
@@ -132,7 +128,6 @@
     <div class="row justify-content-center">
         <div class="col-md-10">
             
-            <!-- BAŞLIK -->
             <div class="text-center mb-4">
                 <h2 class="d-inline-flex align-items-center gap-3" style="color: var(--title-color);">
                     <i class="fa-solid fa-database brand-icon fa-lg"></i>
@@ -140,7 +135,6 @@
                 </h2>
             </div>
             
-            <!-- DATABASE CONNECTION FORM -->
             <div class="card p-4 mb-4 shadow-lg">
                 <form id="dbForm">
                     <div class="row">
@@ -181,7 +175,6 @@
                 </form>
             </div>
 
-            <!-- SECURITY AUDIT REPORT PANEL -->
             <div id="resultBox" class="card p-4 result-card shadow-lg mb-4">
                 <h4 class="text-success mb-3"><strong>Audit Report Generated Successfully!</strong></h4>
                 <p><strong>Database Banner:</strong> <span id="dbVersion" class="text-warning font-monospace small"></span></p>
@@ -198,7 +191,6 @@
                         </div>
                     </div>
 
-                    <!-- DATABASE INFORMATION -->
                     <div class="row mb-4">
                         <div class="col-md-12">
                             <h6 class="text-success mb-3 fw-bold"><i class="fa-solid fa-sliders me-2"></i>Database Information</h6>
@@ -235,20 +227,23 @@
                         </div>
                     </div>
 
-                    <!-- VULNERABILITY LOGS -->
                     <div class="row">
                         <div class="col-md-12">
-                            <h6 class="text-warning mb-3 fw-bold"><i class="fa-solid fa-triangle-exclamation me-2"></i>Vulnerability Assessment Logs</h6>
-                            <div id="vulnerabilityList" style="max-height: 450px; overflow-y: auto;">
-                                <!-- Vulnerabilities end up here -->
-                            </div>
+                            <h6 class="text-warning mb-3 fw-bold"><i class="fa-solid fa-triangle-exclamation me-2"></i>Vulnerability Assessment Logs<span id="vulnCounter"></span></h6>
+                            <div id="vulnerabilityList" style="max-height: 450px; overflow-y: auto;"></div>
                         </div>
                     </div>
                 </div>
 
                 <!-- SQL QUERY CONSOLE -->
                 <div id="sqlPanel" class="mt-4 border-top pt-3" style="display: none;">
-                    <h5 class="text-success mb-2"><strong>SQL Query Console</strong></h5>
+                    <!-- SQL QUERY CONSOLE (SAĞ ÜST KÖŞEYE DISKET BUTONU EKLENDI) -->
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h5 class="text-success m-0"><strong>SQL Query Console</strong></h5>
+    <button type="button" id="btnSaveSql" class="btn btn-outline-primary btn-sm" title="Save Query to File (.sql)">
+        <i class="fa-solid fa-floppy-disk me-1"></i> Save Script
+    </button>
+</div>
                     <div class="mb-3">
                         <textarea class="form-control font-monospace" id="sqlQuery" rows="3" placeholder="e.g., SELECT * FROM pg_stat_activity;"></textarea>
                     </div>
@@ -277,7 +272,7 @@
                     
                     <div class="mb-3">
                         <label class="form-label text-warning fw-bold">Query Content View:</label>
-                        <pre id="scriptContentView" class="p-2 bg-dark rounded text-info font-monospace small" style="border: 1px solid #444; max-height: 100px; overflow-y: auto;">Select a script template above...</pre>
+                        <pre id="scriptContentView" class="p-2 rounded font-monospace small" style="max-height: 100px; overflow-y: auto;">Select a script template above...</pre>
                     </div>
 
                     <button type="button" id="btnRunSimulation" class="btn btn-danger w-100 fw-bold btn-sm mb-3">Execute Compliance Audit Test</button>
@@ -360,7 +355,11 @@ const databasePolicyScripts = {
         { id: "pg_inject_test", name: "Simulate SQL Injection Blind Input Testing", code: "SELECT * FROM users WHERE username = 'admin' OR '1'='1';" },
         { id: "pg_brute_test", name: "Analyze Role Authentication Settings (Brute-Force Vulnerability Check)", code: "SELECT rolname, rolpassword FROM pg_authid WHERE rolname='postgres';" },
         { id: "pg_audit_check", name: "Audit Framework Trail Activation Status", code: "SHOW local_preload_libraries; -- Check for pgaudit activation" },
-        { id: "pg_perm_leak", name: "Check Insecure Object Grants and Schema Leakage", code: "SELECT grantee, privilege_type FROM information_schema.role_table_grants WHERE table_name = 'users';" }
+        { id: "pg_perm_leak", name: "Check Insecure Object Grants and Schema Leakage", code: "SELECT grantee, privilege_type FROM information_schema.role_table_grants WHERE table_name = 'users';" },
+        { id: "pg_dos_test", name: "Simulate Connection Exhaustion Denial of Service (DoS)", code: "SELECT pg_sleep(10); -- Simulating resource hold lock" },
+        { id: "pg_version_exploit", name: "Analyze Outdated Software Vulnerabilities", code: "SELECT version(); -- Analyzing exploit catalog compliance" },
+        { id: "pg_data_exfil", name: "Test Bulk Data Exfiltration Constraints", code: "SELECT * FROM public.users LIMIT 999999;" },
+        { id: "pg_mitm_sniff", name: "Verify SSL/TLS Encryption Network Status", code: "SHOW ssl;" }
     ],
     "mysql": [
         { id: "my_anon_scan", name: "Simulate Anonymous User Identity Probing", code: "SELECT User, Host FROM mysql.user WHERE User = '';" },
@@ -473,6 +472,8 @@ document.getElementById('dbForm').addEventListener('submit', async (e) => {
             document.getElementById('infoSize').innerText = data.details.info.db_size;
             document.getElementById('infoEncoding').innerText = data.details.info.db_encoding;
             document.getElementById('infoSchema').innerText = data.details.info.current_schema;
+            // Başlığın yanındaki parantez içi sayacı dinamik olarak günceller
+document.getElementById('vulnCounter').innerText = ` ( ${data.details.vulnerabilities.length} ) `;
 
             if(data.details.vulnerabilities.length === 0) {
                 vulnList.innerHTML = `<div class="alert alert-success small">🎉 No vulnerabilities detected! The database conforms to security guidelines.</div>`;
@@ -484,7 +485,6 @@ document.getElementById('dbForm').addEventListener('submit', async (e) => {
                     
                     const guide = remediationDatabase[v.title] || { steps: "Apply generic system hardening guidelines.", solution: "N/A" };
                     
-                    // COZUM: Hardcoded bg-dark kaldırıldı, yerine vuln-item-card CSS sınıfı entegre edildi.
                     vulnList.innerHTML += `
                         <div class="card p-3 mb-2 vuln-item-card">
                             <div class="d-flex justify-content-between align-items-center">
@@ -526,6 +526,7 @@ document.getElementById('dbForm').addEventListener('submit', async (e) => {
     }
 });
 
+// EXECUTE SECURITY AUDIT SIMULATION
 document.getElementById('btnRunSimulation').addEventListener('click', async () => {
     const dbType = document.getElementById('db_type').value;
     const scriptId = document.getElementById('policyScriptSelector').value;
@@ -533,7 +534,7 @@ document.getElementById('btnRunSimulation').addEventListener('click', async () =
     const terminal = document.getElementById('terminalOutput');
     
     outputBox.style.display = 'block';
-    terminal.innerHTML = `[i] Initializing Policy Diagnostics for Engine: ${dbType.toUpperCase()}...\n[i] Loading test profile sequence token...\n`;
+    terminal.innerHTML = `[i] Initializing Policy Diagnostics Engine for: ${dbType.toUpperCase()}...\n[i] Loading validation rules & threat sequences...\n`;
 
     try {
         const response = await fetch('/simulate_policy', {
@@ -546,21 +547,38 @@ document.getElementById('btnRunSimulation').addEventListener('click', async () =
         });
         const data = await response.json();
         
-        let formattedLog = `[+] Target Engine Context: ${data.engine.toUpperCase()}\n`;
-        formattedLog += `[+] Verification Action: ${data.test_run}\n`;
-        formattedLog += `[~] Query Simulated: ${data.query}\n\n`;
-        formattedLog += `------------------ SECURITY LOG VIEW ------------------\n`;
+        let statusHeader = "";
+        let headerColor = "color: #2ecc71; font-weight: bold;";
         
-        data.logs.forEach(log => {
-            formattedLog += `${log}\n`;
+        if (data.status === "VULNERABLE") {
+            statusHeader = "[ AUDIT STATE: NON-COMPLIANT // VULNERABILITY DETECTED ]";
+            headerColor = "color: #ff4757; font-weight: bold;";
+        } else {
+            statusHeader = "[ AUDIT STATE: SUCCESS // ENVIRONMENT SECURE ]";
+            headerColor = "color: #2ecc71; font-weight: bold;";
+        }
+        
+        let detailedOutput = `<span style="${headerColor}">${statusHeader}</span>\n`;
+        detailedOutput += `[+] Target Engine        : ${data.engine.toUpperCase()}\n`;
+        detailedOutput += `[+] Verification Scope   : ${data.test_run}\n`;
+        detailedOutput += `[~] Query Simulated      : ${data.query}\n\n`;
+        detailedOutput += `====================== STRUCTURAL DIAGNOSTIC TRAIL LOGS ======================\n`;
+        
+        data.details.forEach(line => {
+            detailedOutput += `${line}\n`;
         });
         
-        terminal.innerText = formattedLog;
+        detailedOutput += `\n====================== MITIGATION & HARDENING RECIPE ======================\n`;
+        detailedOutput += `🛡️ ${data.remediation}\n`;
+        
+        terminal.innerHTML = detailedOutput;
+        
     } catch (err) {
-        terminal.innerText = "[-] Error connecting to simulation endpoint route.";
+        terminal.innerHTML = `<span style="color: #ff4757;">[-] Fatal failure connecting to the compliance engine API channel.</span>`;
     }
 });
 
+// SQL CONSOLE
 document.getElementById('btnExecuteSql').addEventListener('click', async () => {
     const sqlQuery = document.getElementById('sqlQuery').value;
     const sqlResultBox = document.getElementById('sqlResultBox');
@@ -610,6 +628,27 @@ document.getElementById('btnExecuteSql').addEventListener('click', async () => {
         sqlStatusAlert.className = 'alert alert-danger p-2';
         sqlStatusAlert.innerText = 'An error occurred while sending the query.';
     }
+    // SQL SCRIPT KAYDETME (DOSYA İNDİRME) FONKSİYONU
+document.getElementById('btnSaveSql').addEventListener('click', () => {
+    const sqlContent = document.getElementById('sqlQuery').value;
+    
+    if (!sqlContent.trim()) {
+        alert("The SQL editor is empty! Please write some code before saving.");
+        return;
+    }
+    
+    // Geçici bir indirme elementi (blob) oluşturup tetikliyoruz
+    const blob = new Blob([sqlContent], { type: 'text/plain' });
+    const link = document.createElement('a');
+    
+    link.download = 'query_script.sql'; // Bilgisayara kaydolacak varsayılan dosya adı
+    link.href = window.URL.createObjectURL(blob);
+    link.dataset.downloadstring = ['text/plain', link.download, link.href].join(':');
+    
+    document.body.appendChild(link);
+    link.click(); // Farklı kaydet penceresini tetikler
+    document.body.removeChild(link);
+});
 });
 </script>
 
