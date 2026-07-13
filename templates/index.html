@@ -115,7 +115,11 @@
     <i class="fa-solid fa-sun" id="themeIcon"></i>
 </button>
 
-<div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1100;">
+<button id="btnNewConnection" class="btn btn-success fw-bold shadow-lg" title="Start a New Connection" style="position: fixed; top: 20px; right: 75px; z-index: 1200; display: none; border-radius: 25px;" onclick="location.reload()">
+    <i class="fa-solid fa-plug me-1"></i> New Connection
+</button>
+
+<div class="toast-container position-fixed end-0 p-3" style="top: 80px; z-index: 1100;">
     <div id="securityToast" class="toast align-items-center text-white bg-success border-0 shadow-lg" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="4000">
         <div class="d-flex">
             <div class="toast-body fw-bold" id="toastMessage">Scanning...</div>
@@ -135,7 +139,7 @@
                 </h2>
             </div>
             
-            <div class="card p-4 mb-4 shadow-lg">
+            <div class="card p-4 mb-4 shadow-lg" id="connectionFormCard">
                 <form id="dbForm">
                     <div class="row">
                         <div class="col-md-4 mb-3">
@@ -229,7 +233,12 @@
 
                     <div class="row">
                         <div class="col-md-12">
-                            <h6 class="text-warning mb-3 fw-bold"><i class="fa-solid fa-triangle-exclamation me-2"></i>Vulnerability Assessment Logs<span id="vulnCounter"></span></h6>
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="text-warning fw-bold m-0"><i class="fa-solid fa-triangle-exclamation me-2"></i>Vulnerability Assessment Logs<span id="vulnCounter"></span></h6>
+                                <button type="button" id="btnRecheckVulns" class="btn btn-outline-warning btn-sm" title="Re-run the vulnerability audit (reflects any SQL changes you made)">
+                                    <i class="fa-solid fa-rotate me-1"></i> Recheck
+                                </button>
+                            </div>
                             <div id="vulnerabilityList" style="max-height: 450px; overflow-y: auto;"></div>
                         </div>
                     </div>
@@ -347,6 +356,50 @@ const remediationDatabase = {
     "Suboptimal Shared Memory (Potential DoS Vulnerability)": {
         steps: "Leaving shared allocation blocks under the default tiny threshold causes massive disk I/O bottlenecks. Upgrading buffers increases computational stability.",
         solution: "Adjust internal cache threshold in postgresql.conf:<br><strong>shared_buffers = '256MB'</strong><br>Then restart the primary engine service."
+    },
+    "Excessive Privileges (SUPER)": {
+        steps: "The SUPER privilege grants near-total control over the server. Enforce strict 'Least Privilege' controls across all system users.",
+        solution: "REVOKE SUPER ON *.* FROM 'your_username'@'host';<br>FLUSH PRIVILEGES;"
+    },
+    "Weak or Predictable Password (MySQL)": {
+        steps: "The credentials detected are highly predictable and prone to automated dictionary or brute-force attacks. Transition to a password containing at least 12 characters.",
+        solution: "ALTER USER 'your_username'@'host' IDENTIFIED BY 'New_Strong_Secure_Pass_2026!';<br>FLUSH PRIVILEGES;"
+    },
+    "Unencrypted Connection (No SSL - MySQL)": {
+        steps: "Database traffic is being transmitted in raw cleartext. Sniffing tools on adjacent networks could easily intercept authorization sequences.",
+        solution: "Enable TLS in my.cnf:<br><strong>require_secure_transport = ON</strong><br>Then configure ssl-cert / ssl-key and restart the service."
+    },
+    "Default Port Exposure (MySQL)": {
+        steps: "Standard port bindings (like 3306) are the primary checkpoints for widespread scanning bots. Shifting ports minimizes continuous network noise.",
+        solution: "Modify parameter in my.cnf:<br><strong>port = 33060</strong><br>Then restart the MySQL service."
+    },
+    "FILE Privilege Granted": {
+        steps: "The FILE privilege lets an account read/write arbitrary files on the host, which combined with an app vulnerability can lead to remote code execution.",
+        solution: "REVOKE FILE ON *.* FROM 'your_username'@'host';<br>FLUSH PRIVILEGES;"
+    },
+    "Weak Password Hashing Method (MySQL)": {
+        steps: "Legacy plugins like mysql_native_password use weaker hashing than the modern default and are easier to crack offline.",
+        solution: "ALTER USER 'your_username'@'host' IDENTIFIED WITH caching_sha2_password BY 'New_Strong_Secure_Pass_2026!';"
+    },
+    "Outdated Database Version (MySQL)": {
+        steps: "Legacy major versions are deprecated, exposed to unpatched CVE vulnerabilities, and missing vital security patches.",
+        solution: "Plan a supported upgrade path (e.g. via mysql_upgrade or migrating to a fresh MySQL 8.x/9.x instance)."
+    },
+    "Unlimited Connection Settings (MySQL)": {
+        steps: "Allowing an account unlimited connections makes the database vulnerable to connection exhaustion attacks (DoS).",
+        solution: "ALTER USER 'your_username'@'host' WITH MAX_USER_CONNECTIONS 20;"
+    },
+    "Anonymous Accounts Present": {
+        steps: "Anonymous accounts let anyone connect without providing any credentials at all, bypassing authentication entirely.",
+        solution: "DROP USER ''@'localhost';<br>DROP USER ''@'%';<br>FLUSH PRIVILEGES;"
+    },
+    "Insecure Session Logging (Audit Trail Missing - MySQL)": {
+        steps: "Missing query logging prevents security teams from generating post-incident forensics. Activating the general log tracks incoming threat vectors.",
+        solution: "SET GLOBAL general_log = 'ON';<br>SET GLOBAL log_output = 'TABLE';"
+    },
+    "Suboptimal Buffer Pool Size (Potential DoS Vulnerability)": {
+        steps: "Leaving the InnoDB buffer pool under the default tiny threshold causes heavy disk I/O and makes the server prone to slow-query DoS.",
+        solution: "Adjust in my.cnf:<br><strong>innodb_buffer_pool_size = 256M</strong><br>Then restart the MySQL service."
     }
 };
 
@@ -362,6 +415,14 @@ const databasePolicyScripts = {
         { id: "pg_mitm_sniff", name: "Verify SSL/TLS Encryption Network Status", code: "SHOW ssl;" }
     ],
     "mysql": [
+        { id: "my_inject_test", name: "Simulate SQL Injection Blind Input Testing", code: "SELECT * FROM users WHERE username = 'admin' OR '1'='1';" },
+        { id: "my_brute_test", name: "Analyze Account Authentication Settings (Brute-Force Vulnerability Check)", code: "SELECT User, Host, authentication_string FROM mysql.user WHERE User = 'root';" },
+        { id: "my_audit_check", name: "Audit Framework Trail Activation Status", code: "SHOW VARIABLES LIKE 'general_log'; -- Check for query logging" },
+        { id: "my_perm_leak", name: "Check Insecure Wildcard Host Grants", code: "SELECT User, Host FROM mysql.user WHERE Host = '%';" },
+        { id: "my_dos_test", name: "Simulate Connection Exhaustion Denial of Service (DoS)", code: "SELECT SLEEP(10); -- Simulating resource hold lock" },
+        { id: "my_version_exploit", name: "Analyze Outdated Software Vulnerabilities", code: "SELECT VERSION(); -- Analyzing exploit catalog compliance" },
+        { id: "my_data_exfil", name: "Test Bulk Data Exfiltration Constraints", code: "SELECT * FROM users LIMIT 999999;" },
+        { id: "my_mitm_sniff", name: "Verify SSL/TLS Encryption Network Status", code: "SHOW STATUS LIKE 'Ssl_cipher';" },
         { id: "my_anon_scan", name: "Simulate Anonymous User Identity Probing", code: "SELECT User, Host FROM mysql.user WHERE User = '';" },
         { id: "my_priv_check", name: "Verify File System Injection Access Privilege (LOAD DATA INFILE)", code: "SELECT User, Host, File_priv FROM mysql.user WHERE File_priv = 'Y';" },
         { id: "my_pwd_check", name: "Audit Legacy Authentication Methods (Old Passwords Check)", code: "SELECT User, Host, plugin FROM mysql.user WHERE plugin = 'mysql_native_password';" }
@@ -423,6 +484,64 @@ function getDbConfig() {
     };
 }
 
+function renderAuditResults(data) {
+    const vulnList = document.getElementById('vulnerabilityList');
+
+    document.getElementById('dbVersion').innerText = data.details.version;
+    document.getElementById('lblTableCount').innerText = data.details.table_count;
+    document.getElementById('lblConnections').innerText = data.details.active_connections;
+
+    document.getElementById('infoDbName').innerText = data.details.info.db_name;
+    document.getElementById('infoHostPort').innerText = data.details.info.db_host + " : " + data.details.info.db_port;
+    document.getElementById('infoUser').innerText = data.details.info.db_user;
+    document.getElementById('infoSize').innerText = data.details.info.db_size;
+    document.getElementById('infoEncoding').innerText = data.details.info.db_encoding;
+    document.getElementById('infoSchema').innerText = data.details.info.current_schema;
+    // Başlığın yanındaki parantez içi sayacı dinamik olarak günceller
+    document.getElementById('vulnCounter').innerText = ` ( ${data.details.vulnerabilities.length} ) `;
+
+    vulnList.innerHTML = '';
+    if(data.details.vulnerabilities.length === 0) {
+        vulnList.innerHTML = `<div class="alert alert-success small">🎉 No vulnerabilities detected! The database conforms to security guidelines.</div>`;
+    } else {
+        data.details.vulnerabilities.forEach((v, index) => {
+            let badgeClass = 'badge-low';
+            if(v.severity === 'CRITICAL') badgeClass = 'badge-critical';
+            if(v.severity === 'MEDIUM') badgeClass = 'badge-medium';
+
+            const guide = remediationDatabase[v.title] || { steps: "Apply generic system hardening guidelines.", solution: "N/A" };
+
+            vulnList.innerHTML += `
+                <div class="card p-3 mb-2 vuln-item-card">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <strong style="font-size:14px;">${v.title}</strong>
+                        <div>
+                            <span class="badge ${badgeClass} px-3 py-1 me-2" style="font-size:11px; font-weight:bold;">${v.severity}</span>
+                            <button class="btn btn-sm btn-outline-warning py-0 px-2" style="font-size:11px;" type="button" data-bs-toggle="collapse" data-bs-target="#fix-${index}">How to Fix</button>
+                        </div>
+                    </div>
+                    <p class="text-muted small mb-0 mt-2" style="font-size:12px; line-height:1.5;">${v.desc}</p>
+
+                    <div class="collapse" id="fix-${index}">
+                        <div class="fix-box small">
+                            <div class="mb-2 text-warning"><strong>🛡️ Remediation Steps:</strong></div>
+                            <p class="mb-2" style="font-size:12px;">${guide.steps}</p>
+                            <div class="text-success mb-1"><strong>💻 Fix / SQL Command:</strong></div>
+                            <div class="p-2 rounded font-monospace text-info bg-black" style="font-size:11px; border:1px solid #444;">
+                                ${guide.solution}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    document.getElementById('sqlPanel').style.display = 'block';
+    document.getElementById('corporatePanel').style.display = 'block';
+    document.getElementById('policySimulationPanel').style.display = 'block';
+}
+
 document.getElementById('dbForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const config = getDbConfig();
@@ -433,9 +552,9 @@ document.getElementById('dbForm').addEventListener('submit', async (e) => {
     const toastMsg = document.getElementById('toastMessage');
     const bsToast = new bootstrap.Toast(toastEl);
     
-    if (config.db_type !== 'postgresql') {
+    if (config.db_type === 'oracle') {
         toastEl.className = "toast align-items-center text-white bg-warning border-0 shadow-lg";
-        toastMsg.innerText = "⚠️ " + config.db_type.toUpperCase() + " module integration is coming soon in Future Scope! Currently only PostgreSQL is supported for live audit.";
+        toastMsg.innerText = "⚠️ Oracle module integration is coming soon in Future Scope! Currently PostgreSQL and MySQL are supported for live audit.";
         bsToast.show();
         return;
     }
@@ -461,59 +580,10 @@ document.getElementById('dbForm').addEventListener('submit', async (e) => {
             bsToast.show();
 
             resultBox.style.display = 'block';
-            
-            document.getElementById('dbVersion').innerText = data.details.version;
-            document.getElementById('lblTableCount').innerText = data.details.table_count;
-            document.getElementById('lblConnections').innerText = data.details.active_connections;
+            document.getElementById('connectionFormCard').style.display = 'none';
+            document.getElementById('btnNewConnection').style.display = 'inline-block';
 
-            document.getElementById('infoDbName').innerText = data.details.info.db_name;
-            document.getElementById('infoHostPort').innerText = data.details.info.db_host + " : " + data.details.info.db_port;
-            document.getElementById('infoUser').innerText = data.details.info.db_user;
-            document.getElementById('infoSize').innerText = data.details.info.db_size;
-            document.getElementById('infoEncoding').innerText = data.details.info.db_encoding;
-            document.getElementById('infoSchema').innerText = data.details.info.current_schema;
-            // Başlığın yanındaki parantez içi sayacı dinamik olarak günceller
-document.getElementById('vulnCounter').innerText = ` ( ${data.details.vulnerabilities.length} ) `;
-
-            if(data.details.vulnerabilities.length === 0) {
-                vulnList.innerHTML = `<div class="alert alert-success small">🎉 No vulnerabilities detected! The database conforms to security guidelines.</div>`;
-            } else {
-                data.details.vulnerabilities.forEach((v, index) => {
-                    let badgeClass = 'badge-low';
-                    if(v.severity === 'CRITICAL') badgeClass = 'badge-critical';
-                    if(v.severity === 'MEDIUM') badgeClass = 'badge-medium';
-                    
-                    const guide = remediationDatabase[v.title] || { steps: "Apply generic system hardening guidelines.", solution: "N/A" };
-                    
-                    vulnList.innerHTML += `
-                        <div class="card p-3 mb-2 vuln-item-card">
-                            <div class="d-flex justify-content-between align-items-center">
-                                <strong style="font-size:14px;">${v.title}</strong>
-                                <div>
-                                    <span class="badge ${badgeClass} px-3 py-1 me-2" style="font-size:11px; font-weight:bold;">${v.severity}</span>
-                                    <button class="btn btn-sm btn-outline-warning py-0 px-2" style="font-size:11px;" type="button" data-bs-toggle="collapse" data-bs-target="#fix-${index}">How to Fix</button>
-                                </div>
-                            </div>
-                            <p class="text-muted small mb-0 mt-2" style="font-size:12px; line-height:1.5;">${v.desc}</p>
-                            
-                            <div class="collapse" id="fix-${index}">
-                                <div class="fix-box small">
-                                    <div class="mb-2 text-warning"><strong>🛡️ Remediation Steps:</strong></div>
-                                    <p class="mb-2" style="font-size:12px;">${guide.steps}</p>
-                                    <div class="text-success mb-1"><strong>💻 Fix / SQL Command:</strong></div>
-                                    <div class="p-2 rounded font-monospace text-info bg-black" style="font-size:11px; border:1px solid #444;">
-                                        ${guide.solution}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                });
-            }
-
-            document.getElementById('sqlPanel').style.display = 'block';
-            document.getElementById('corporatePanel').style.display = 'block';
-            document.getElementById('policySimulationPanel').style.display = 'block';
+            renderAuditResults(data);
         } else {
             toastEl.className = "toast align-items-center text-white bg-danger border-0 shadow-lg";
             toastMsg.innerText = "❌ " + data.message;
@@ -523,6 +593,46 @@ document.getElementById('vulnCounter').innerText = ` ( ${data.details.vulnerabil
         toastEl.className = "toast align-items-center text-white bg-danger border-0 shadow-lg";
         toastMsg.innerText = "❌ An error occurred during scanning.";
         bsToast.show();
+    }
+});
+
+// RECHECK VULNERABILITIES (re-runs the audit against current DB state, reflecting any SQL changes)
+document.getElementById('btnRecheckVulns').addEventListener('click', async () => {
+    const config = getDbConfig();
+    const toastEl = document.getElementById('securityToast');
+    const toastMsg = document.getElementById('toastMessage');
+    const bsToast = new bootstrap.Toast(toastEl);
+    const btn = document.getElementById('btnRecheckVulns');
+
+    btn.disabled = true;
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-rotate fa-spin me-1"></i> Checking...';
+
+    try {
+        const response = await fetch('/connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            renderAuditResults(data);
+            toastEl.className = "toast align-items-center text-white bg-success border-0 shadow-lg";
+            toastMsg.innerText = "🔄 Vulnerability list refreshed based on the current database state.";
+            bsToast.show();
+        } else {
+            toastEl.className = "toast align-items-center text-white bg-danger border-0 shadow-lg";
+            toastMsg.innerText = "❌ " + data.message;
+            bsToast.show();
+        }
+    } catch (error) {
+        toastEl.className = "toast align-items-center text-white bg-danger border-0 shadow-lg";
+        toastMsg.innerText = "❌ An error occurred while rechecking.";
+        bsToast.show();
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
     }
 });
 
@@ -628,27 +738,46 @@ document.getElementById('btnExecuteSql').addEventListener('click', async () => {
         sqlStatusAlert.className = 'alert alert-danger p-2';
         sqlStatusAlert.innerText = 'An error occurred while sending the query.';
     }
-    // SQL SCRIPT KAYDETME (DOSYA İNDİRME) FONKSİYONU
-document.getElementById('btnSaveSql').addEventListener('click', () => {
+});
+
+// SQL SCRIPT KAYDETME (KLASÖR SEÇEREK KAYDETME) FONKSİYONU
+document.getElementById('btnSaveSql').addEventListener('click', async () => {
     const sqlContent = document.getElementById('sqlQuery').value;
-    
+
     if (!sqlContent.trim()) {
         alert("The SQL editor is empty! Please write some code before saving.");
         return;
     }
-    
-    // Geçici bir indirme elementi (blob) oluşturup tetikliyoruz
+
+    // Modern tarayıcılar (Chrome/Edge): native "Farklı Kaydet" klasör seçme penceresi
+    if (window.showSaveFilePicker) {
+        try {
+            const handle = await window.showSaveFilePicker({
+                suggestedName: 'query_script.sql',
+                types: [{
+                    description: 'SQL Script',
+                    accept: { 'text/plain': ['.sql'] }
+                }]
+            });
+            const writable = await handle.createWritable();
+            await writable.write(sqlContent);
+            await writable.close();
+            return;
+        } catch (err) {
+            // Kullanıcı pencereyi iptal ettiyse (AbortError) sessizce çık, gerçek hata değilse fallback'e düş
+            if (err.name === 'AbortError') return;
+        }
+    }
+
+    // Fallback (Firefox/Safari gibi File System Access API desteklemeyen tarayıcılar için)
     const blob = new Blob([sqlContent], { type: 'text/plain' });
     const link = document.createElement('a');
-    
-    link.download = 'query_script.sql'; // Bilgisayara kaydolacak varsayılan dosya adı
+    link.download = 'query_script.sql';
     link.href = window.URL.createObjectURL(blob);
-    link.dataset.downloadstring = ['text/plain', link.download, link.href].join(':');
-    
     document.body.appendChild(link);
-    link.click(); // Farklı kaydet penceresini tetikler
+    link.click();
     document.body.removeChild(link);
-});
+    window.URL.revokeObjectURL(link.href);
 });
 </script>
 
