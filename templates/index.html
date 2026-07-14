@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Database Security & Audit Dashboard</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23198754'%3E%3Cpath d='M12 2C7.58 2 4 3.79 4 6s3.58 4 8 4 8-1.79 8-4-3.58-4-8-4zM4 8v4c0 2.21 3.58 4 8 4s8-1.79 8-4V8c0 2.21-3.58 4-8 4s-8-1.79-8-4zm0 6v4c0 2.21 3.58 4 8 4s8-1.79 8-4v-4c0 2.21-3.58 4-8 4s-8-1.79-8-4z'/%3E%3C/svg%3E">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
@@ -152,7 +153,7 @@
                         </div>
                         <div class="col-md-4 mb-3">
                             <label class="form-label">Host</label>
-                            <input type="text" class="form-control" id="host" value="localhost" required>
+                            <input type="text" class="form-control" id="host" placeholder="e.g. localhost" required>
                         </div>
                         <div class="col-md-4 mb-3">
                             <label class="form-label">Port</label>
@@ -180,8 +181,13 @@
             </div>
 
             <div id="resultBox" class="card p-4 result-card shadow-lg mb-4">
-                <h4 class="text-success mb-3"><strong>Audit Report Generated Successfully!</strong></h4>
-                <p><strong>Database Banner:</strong> <span id="dbVersion" class="text-warning font-monospace small"></span></p>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h4 class="text-success m-0"><strong>Audit Report Generated Successfully!</strong></h4>
+                    <button type="button" id="btnExportPdf" class="btn btn-outline-success btn-sm" title="Save this report as a PDF">
+                        <i class="fa-solid fa-file-pdf me-1"></i> Export PDF
+                    </button>
+                </div>
+                <span id="dbVersion" style="display:none;"></span>
                 
                 <div id="corporatePanel" class="card p-3 mt-4" style="display: none; background-color: rgba(0,0,0,0.05);">
                     <div class="row text-center mb-4">
@@ -201,6 +207,10 @@
                             <div class="card p-3">
                                 <table class="table table-sm mb-0 info-table">
                                     <tbody>
+                                        <tr>
+                                            <th>Database Version:</th>
+                                            <td id="infoVersion">N/A</td>
+                                        </tr>
                                         <tr>
                                             <th>Database Name:</th>
                                             <td id="infoDbName">N/A</td>
@@ -485,9 +495,11 @@ function getDbConfig() {
 }
 
 function renderAuditResults(data) {
+    window.lastAuditData = data;
     const vulnList = document.getElementById('vulnerabilityList');
 
     document.getElementById('dbVersion').innerText = data.details.version;
+    document.getElementById('infoVersion').innerHTML = data.details.version.split(',').map(part => part.trim()).join('<br>');
     document.getElementById('lblTableCount').innerText = data.details.table_count;
     document.getElementById('lblConnections').innerText = data.details.active_connections;
 
@@ -596,7 +608,118 @@ document.getElementById('dbForm').addEventListener('submit', async (e) => {
     }
 });
 
-// RECHECK VULNERABILITIES (re-runs the audit against current DB state, reflecting any SQL changes)
+// EXPORT REPORT AS PDF
+document.getElementById('btnExportPdf').addEventListener('click', () => {
+    const data = window.lastAuditData;
+    if (!data) return;
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const marginX = 14;
+    let y = 18;
+
+    function addPageIfNeeded(extra) {
+        if (y + extra > 280) {
+            doc.addPage();
+            y = 18;
+        }
+    }
+
+    // Header
+    doc.setFontSize(16);
+    doc.setTextColor(25, 135, 84);
+    doc.setFont(undefined, 'bold');
+    doc.text("Database Security Audit Report", marginX, y);
+    y += 8;
+
+    doc.setFontSize(9);
+    doc.setTextColor(120, 120, 120);
+    doc.setFont(undefined, 'normal');
+    doc.text("Generated: " + new Date().toLocaleString(), marginX, y);
+    y += 10;
+
+    // Database Information
+    doc.setFontSize(12);
+    doc.setTextColor(25, 135, 84);
+    doc.setFont(undefined, 'bold');
+    doc.text("Database Information", marginX, y);
+    y += 7;
+
+    doc.setFontSize(10);
+    doc.setTextColor(30, 30, 30);
+    doc.setFont(undefined, 'normal');
+    const info = data.details.info;
+    const infoLines = [
+        ["Database Version:", data.details.version],
+        ["Database Name:", info.db_name],
+        ["Host / Port:", info.db_host + " : " + info.db_port],
+        ["Connected User:", info.db_user],
+        ["Database Size:", info.db_size],
+        ["Character Encoding:", info.db_encoding],
+        ["Current Schema:", info.current_schema],
+        ["Total Discovered Tables:", data.details.table_count],
+        ["Active Sessions / Connections:", data.details.active_connections]
+    ];
+    infoLines.forEach(([label, value]) => {
+        addPageIfNeeded(7);
+        doc.setFont(undefined, 'bold');
+        doc.text(label, marginX, y);
+        doc.setFont(undefined, 'normal');
+        doc.text(String(value), marginX + 55, y, { maxWidth: pageWidth - marginX - 55 - marginX });
+        y += 7;
+    });
+
+    y += 5;
+    addPageIfNeeded(10);
+    doc.setFontSize(12);
+    doc.setTextColor(220, 53, 69);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Vulnerability Assessment (${data.details.vulnerabilities.length} found)`, marginX, y);
+    y += 8;
+
+    if (data.details.vulnerabilities.length === 0) {
+        doc.setFontSize(10);
+        doc.setTextColor(25, 135, 84);
+        doc.setFont(undefined, 'normal');
+        doc.text("No vulnerabilities detected. The database conforms to security guidelines.", marginX, y);
+        y += 8;
+    } else {
+        data.details.vulnerabilities.forEach((v, i) => {
+            addPageIfNeeded(24);
+            doc.setFontSize(10);
+            doc.setTextColor(30, 30, 30);
+            doc.setFont(undefined, 'bold');
+            doc.text(`${i + 1}. [${v.severity}] ${v.title}`, marginX, y);
+            y += 6;
+
+            doc.setFont(undefined, 'normal');
+            doc.setTextColor(90, 90, 90);
+            const descLines = doc.splitTextToSize(v.desc, pageWidth - marginX * 2);
+            doc.text(descLines, marginX, y);
+            y += descLines.length * 5 + 2;
+
+            const guide = remediationDatabase[v.title];
+            if (guide) {
+                addPageIfNeeded(14);
+                doc.setTextColor(25, 135, 84);
+                doc.setFont(undefined, 'bold');
+                doc.text("Fix:", marginX, y);
+                y += 5;
+                doc.setFont(undefined, 'normal');
+                doc.setTextColor(60, 60, 60);
+                const fixText = guide.solution.replace(/<br\s*\/?>/gi, ' | ').replace(/<[^>]*>/g, '');
+                const fixLines = doc.splitTextToSize(fixText, pageWidth - marginX * 2);
+                doc.text(fixLines, marginX, y);
+                y += fixLines.length * 5;
+            }
+            y += 6;
+        });
+    }
+
+    const dbNameForFile = (info.db_name || "database").replace(/[^a-z0-9]/gi, '_');
+    doc.save(`security_audit_${dbNameForFile}_${Date.now()}.pdf`);
+});
 document.getElementById('btnRecheckVulns').addEventListener('click', async () => {
     const config = getDbConfig();
     const toastEl = document.getElementById('securityToast');
@@ -782,5 +905,6 @@ document.getElementById('btnSaveSql').addEventListener('click', async () => {
 </script>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </body>
 </html>
