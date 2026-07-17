@@ -3,8 +3,202 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import mysql.connector
 import re
+import os
+import threading
+import time as time_module
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+from datetime import datetime
+import io
+
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import mm
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
 
 app = Flask(__name__)
+
+# ============================================================
+# BÖLÜM: HAFIZA İÇİ (IN-MEMORY) DEPOLAMA — hiçbir şey diske yazılmaz.
+# Uygulama yeniden başlatıldığında (python app.py tekrar çalıştırıldığında)
+# son bağlantı bilgisi ve e-posta ayarları sıfırlanır.
+# ============================================================
+_last_connection_config = None   # Zamanlanmış tarama için: en son kullanılan bağlantı bilgisi
+_schedule_config = None          # Otomatik e-posta rapor ayarları
+
+_memory_lock = threading.Lock()  # Aynı anda birden fazla istek gelirse veri karışmasın diye
+
+def save_last_connection(config):
+    """Zamanlanmış otomatik taramanın kullanacağı bağlantı bilgisini hafızada tutar (dosyaya yazmaz)."""
+    global _last_connection_config
+    with _memory_lock:
+        _last_connection_config = config
+
+def load_last_connection():
+    return _last_connection_config
+
+def load_schedule_config():
+    return _schedule_config
+
+def save_schedule_config(cfg):
+    global _schedule_config
+    with _memory_lock:
+        _schedule_config = cfg
+
+# ============================================================
+# BÖLÜM: SUNUCU TARAFINDA PDF ÜRETİMİ (e-postaya ek olarak gönderilir)
+# ============================================================
+def generate_pdf_bytes(details):
+    """reportlab kullanarak basit bir denetim raporu PDF'i üretir ve byte olarak döner."""
+    if not REPORTLAB_AVAILABLE:
+        raise RuntimeError("reportlab is not installed. Run: pip install reportlab")
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    y = height - 25 * mm
+
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(20 * mm, y, "Database Security Audit Report")
+    y -= 9 * mm
+
+    c.setFont("Helvetica", 9)
+    c.drawString(20 * mm, y, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    y -= 10 * mm
+
+    info = details["info"]
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(20 * mm, y, "Database Information")
+    y -= 7 * mm
+    c.setFont("Helvetica", 9)
+    for label, value in [
+        ("Database:", info.get("db_name")),
+        ("Host / Port:", f"{info.get('db_host')} : {info.get('db_port')}"),
+        ("User:", info.get("db_user")),
+        ("Version:", details.get("version"))
+    ]:
+        c.drawString(20 * mm, y, f"{label} {value}")
+        y -= 6 * mm
+
+    y -= 6 * mm
+    c.setFont("Helvetica-Bold", 12)
+    c.setFillColorRGB(0.7, 0.1, 0.1)
+    c.drawString(20 * mm, y, f"Vulnerabilities Found: {len(details['vulnerabilities'])}")
+    c.setFillColorRGB(0, 0, 0)
+    y -= 9 * mm
+
+    c.setFont("Helvetica", 9)
+    for v in details["vulnerabilities"]:
+        if y < 25 * mm:
+            c.showPage()
+            y = height - 20 * mm
+            c.setFont("Helvetica", 9)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(20 * mm, y, f"[{v['severity']}] {v['title']}")
+        y -= 5 * mm
+        c.setFont("Helvetica", 8)
+        desc_lines = simple_wrap(v['desc'], 95)
+        for line in desc_lines:
+            c.drawString(22 * mm, y, line)
+            y -= 4.5 * mm
+        y -= 2 * mm
+
+    c.save()
+    buffer.seek(0)
+    return buffer.read()
+
+def simple_wrap(text, width):
+    """Uzun metni belirtilen karakter genişliğine göre satırlara böler (PDF içinde taşmayı önler)."""
+    words = text.split()
+    lines, current = [], ""
+    for word in words:
+        if len(current) + len(word) + 1 <= width:
+            current = (current + " " + word).strip()
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+# ============================================================
+# BÖLÜM: E-POSTA GÖNDERİMİ
+# ============================================================
+def send_audit_email(details, schedule_cfg):
+    msg = MIMEMultipart()
+    msg['From'] = schedule_cfg['sender_email']
+    msg['To'] = schedule_cfg['receiver_email']
+    msg['Subject'] = f"Automated Database Security Audit - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+    crit = sum(1 for v in details['vulnerabilities'] if v['severity'] == 'CRITICAL')
+    med = sum(1 for v in details['vulnerabilities'] if v['severity'] == 'MEDIUM')
+    low = sum(1 for v in details['vulnerabilities'] if v['severity'] == 'LOW')
+
+    body = (
+        f"Automated security audit completed for '{details['info']['db_name']}'.\n\n"
+        f"Critical: {crit}  |  Medium: {med}  |  Low: {low}\n\n"
+        f"The full report is attached as a PDF."
+    )
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        pdf_bytes = generate_pdf_bytes(details)
+        attachment = MIMEApplication(pdf_bytes, _subtype='pdf')
+        attachment.add_header('Content-Disposition', 'attachment', filename='security_audit_report.pdf')
+        msg.attach(attachment)
+    except RuntimeError as e:
+        msg.attach(MIMEText(f"\n\n[PDF attachment skipped: {str(e)}]", 'plain'))
+
+    with smtplib.SMTP(schedule_cfg['smtp_server'], int(schedule_cfg['smtp_port'])) as server:
+        server.starttls()
+        server.login(schedule_cfg['sender_email'], schedule_cfg['app_password'])
+        server.send_message(msg)
+
+def run_scheduled_audit_and_email():
+    """Zamanlayıcı tarafından tetiklenir: son bağlantı bilgileriyle taramayı tekrar çalıştırır ve e-posta gönderir."""
+    config = load_last_connection()
+    schedule_cfg = load_schedule_config()
+    if not config or not schedule_cfg or not schedule_cfg.get('enabled'):
+        return
+    try:
+        with app.app_context():
+            if config.get('db_type') == 'mysql':
+                response = audit_mysql(config)
+            else:
+                response = audit_postgresql(config)
+            result = response.get_json()
+        if result.get('success'):
+            send_audit_email(result['details'], schedule_cfg)
+            print(f"[Scheduler] Audit email sent successfully at {datetime.now()}")
+        else:
+            print(f"[Scheduler] Audit failed, email not sent: {result.get('message')}")
+    except Exception as e:
+        print(f"[Scheduler Error] {e}")
+
+def scheduler_loop():
+    """Arka planda sürekli çalışan döngü: her 30 saniyede bir, ayarlanan saat gelmiş mi diye kontrol eder."""
+    last_run_date = None
+    while True:
+        try:
+            schedule_cfg = load_schedule_config()
+            if schedule_cfg and schedule_cfg.get('enabled'):
+                now = datetime.now()
+                target_time = schedule_cfg.get('time', '09:00')
+                if now.strftime('%H:%M') == target_time and last_run_date != now.date():
+                    run_scheduled_audit_and_email()
+                    last_run_date = now.date()
+        except Exception as e:
+            print(f"[Scheduler Loop Error] {e}")
+        time_module.sleep(30)
+
+def start_scheduler():
+    t = threading.Thread(target=scheduler_loop, daemon=True)
+    t.start()
 
 def get_db_connection(config):
     db_type = config.get('db_type', 'postgresql')
@@ -27,6 +221,31 @@ def get_db_connection(config):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/schedule_settings', methods=['GET'])
+def get_schedule_settings():
+    cfg = load_schedule_config() or {}
+    # Uygulama şifresini frontend'e geri göndermiyoruz (güvenlik amaçlı)
+    safe_cfg = {k: v for k, v in cfg.items() if k != 'app_password'}
+    safe_cfg['has_password'] = bool(cfg.get('app_password'))
+    return jsonify({"success": True, "settings": safe_cfg})
+
+@app.route('/schedule_settings', methods=['POST'])
+def set_schedule_settings():
+    data = request.json
+    existing = load_schedule_config() or {}
+    new_cfg = {
+        "enabled": data.get('enabled', False),
+        "time": data.get('time', '09:00'),
+        "smtp_server": data.get('smtp_server', ''),
+        "smtp_port": data.get('smtp_port', 587),
+        "sender_email": data.get('sender_email', ''),
+        "receiver_email": data.get('receiver_email', ''),
+        # Şifre alanı boş gönderildiyse (kullanıcı değiştirmediyse) eskisini koru
+        "app_password": data.get('app_password') or existing.get('app_password', '')
+    }
+    save_schedule_config(new_cfg)
+    return jsonify({"success": True, "message": "Schedule settings saved."})
 
 # COMPREHENSIVE DYNAMIC ENGLISH DIAGNOSTIC DATA ENGINE
 def generate_english_policy_report(script_id, config):
@@ -415,7 +634,9 @@ def audit_postgresql(data):
 
         cursor.close()
         conn.close()
-        
+
+        save_last_connection(data)
+
         return jsonify({
             "success": True, "message": "Database Discovery & Ultimate 11-Point Audit Completed!",
             "details": {
@@ -431,8 +652,7 @@ def audit_postgresql(data):
 def audit_mysql(data):
     try:
         conn = get_db_connection(data)
-        # FIX: MySQL imlecinde hem sonuclari bellege tamponlamak (buffered=True) hem de dict donmesi sarttir.
-        cursor = conn.cursor(buffered=True)
+        cursor = conn.cursor()
         db_name = data.get('database')
         user = data.get('user')
 
@@ -518,7 +738,7 @@ def audit_mysql(data):
         log_row = cursor.fetchone()
         if log_row and str(log_row[1]).upper() == 'OFF':
             vulnerabilities.append({"title": "Insecure Session Logging (Audit Trail Missing - MySQL)", "severity": "LOW", "desc": "General query logging is disabled. Security forensics cannot trace suspicious login or query sequences if an incident occurs."})
-            medium_count += 1 # Kalibre ayari: On yuzle tam eslesme saglandi.
+            low_count += 1
 
         cursor.execute("SHOW VARIABLES LIKE 'innodb_buffer_pool_size';")
         buf_row = cursor.fetchone()
@@ -528,6 +748,8 @@ def audit_mysql(data):
 
         cursor.close()
         conn.close()
+
+        save_last_connection(data)
 
         return jsonify({
             "success": True, "message": "Database Discovery & Ultimate 11-Point Audit Completed!",
@@ -558,27 +780,25 @@ def execute_sql():
     try:
         conn = get_db_connection(data)
         if db_type == 'mysql':
-            # FIX: UnreadResultError engellemek icin buffered=True, JSON objesi uretebilmek icin dictionary=True.
-            cursor = conn.cursor(dictionary=True, buffered=True)
+            cursor = conn.cursor(dictionary=True)
         else:
             cursor = conn.cursor(cursor_factory=RealDictCursor)
-            
         cursor.execute(query)
-        
-        # Veri donduren tum sorgulari yakalamak icin description kontrolu
-        is_select = cursor.description is not None
+        is_select = query.upper().startswith("SELECT")
         rows = []; columns = []
-        
         if is_select:
             rows = cursor.fetchall()
-            columns = [desc[0] for desc in cursor.description]
+            if cursor.description: columns = [desc[0] for desc in cursor.description]
         else:
             conn.commit()
-            
         cursor.close(); conn.close()
         return jsonify({"success": True, "message": "Query executed successfully.", "is_select": is_select, "columns": columns, "rows": rows})
     except Exception as e:
         return jsonify({"success": False, "message": f"SQL Error: {str(e)}"})
 
 if __name__ == '__main__':
+    # Flask'ın debug=True reloader'ı süreci ikiye ayırdığı için, zamanlayıcıyı
+    # sadece asıl çalışan süreçte başlatıyoruz (aksi halde e-posta 2 kere gidebilir).
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or not app.debug:
+        start_scheduler()
     app.run(debug=True, port=5000)
