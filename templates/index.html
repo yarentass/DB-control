@@ -355,7 +355,12 @@
                         For Gmail, use an <strong>App Password</strong> (not your normal password) — generate one from your Google Account → Security → App Passwords.
                     </p>
 
-                    <button type="button" id="btnSaveSchedule" class="btn btn-info w-100 fw-bold btn-sm text-white">Save Schedule Settings</button>
+                    <div class="d-flex gap-2">
+                        <button type="button" id="btnSaveSchedule" class="btn btn-info fw-bold btn-sm text-white flex-grow-1">Save Schedule Settings</button>
+                        <button type="button" id="btnTestEmail" class="btn btn-outline-warning fw-bold btn-sm">
+                            <i class="fa-solid fa-paper-plane me-1"></i> Send Test Email Now
+                        </button>
+                    </div>
                 </div>
 
             </div>
@@ -1066,6 +1071,38 @@ document.getElementById('btnSaveSchedule').addEventListener('click', async () =>
         toastEl.className = "toast align-items-center text-white bg-danger border-0 shadow-lg";
         toastMsg.innerText = "❌ Schedule settings could not be saved.";
         bsToast.show();
+    }
+});
+
+document.getElementById('btnTestEmail').addEventListener('click', async () => {
+    const toastEl = document.getElementById('securityToast');
+    const toastMsg = document.getElementById('toastMessage');
+    const bsToast = new bootstrap.Toast(toastEl);
+    const btn = document.getElementById('btnTestEmail');
+
+    btn.disabled = true;
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Sending...';
+
+    toastEl.className = "toast align-items-center text-white bg-info border-0 shadow-lg";
+    toastMsg.innerText = "📨 Save your settings first if you haven't, then sending a test email now...";
+    bsToast.show();
+
+    try {
+        const response = await fetch('/test_email', { method: 'POST' });
+        const data = await response.json();
+        toastEl.className = data.success
+            ? "toast align-items-center text-white bg-success border-0 shadow-lg"
+            : "toast align-items-center text-white bg-danger border-0 shadow-lg";
+        toastMsg.innerText = (data.success ? "✅ " : "❌ ") + data.message;
+        bsToast.show();
+    } catch (error) {
+        toastEl.className = "toast align-items-center text-white bg-danger border-0 shadow-lg";
+        toastMsg.innerText = "❌ Test email request failed.";
+        bsToast.show();
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
     }
 });
 </script>

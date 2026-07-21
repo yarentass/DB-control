@@ -247,6 +247,33 @@ def set_schedule_settings():
     save_schedule_config(new_cfg)
     return jsonify({"success": True, "message": "Schedule settings saved."})
 
+@app.route('/test_email', methods=['POST'])
+def test_email():
+    """Saati beklemeden, mevcut ayarlarla hemen bir test e-postası gönderir (debug amaçlı)."""
+    config = load_last_connection()
+    schedule_cfg = load_schedule_config()
+
+    if not config:
+        return jsonify({"success": False, "message": "No active connection found. Please click 'Connect' first, then try the test again."})
+    if not schedule_cfg:
+        return jsonify({"success": False, "message": "No schedule settings found. Please save your email settings first."})
+    if not schedule_cfg.get('smtp_server') or not schedule_cfg.get('sender_email') or not schedule_cfg.get('app_password') or not schedule_cfg.get('receiver_email'):
+        return jsonify({"success": False, "message": "SMTP server, sender email, app password, and receiver email must all be filled in."})
+
+    try:
+        if config.get('db_type') == 'mysql':
+            response = audit_mysql(config)
+        else:
+            response = audit_postgresql(config)
+        result = response.get_json()
+        if not result.get('success'):
+            return jsonify({"success": False, "message": f"Audit failed: {result.get('message')}"})
+
+        send_audit_email(result['details'], schedule_cfg)
+        return jsonify({"success": True, "message": f"Test email sent to {schedule_cfg['receiver_email']}. Check your inbox (and spam folder)."})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"Test email failed: {str(e)}"})
+
 # COMPREHENSIVE DYNAMIC ENGLISH DIAGNOSTIC DATA ENGINE
 def generate_english_policy_report(script_id, config):
     user = config.get('user', 'postgres')
